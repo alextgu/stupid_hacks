@@ -131,7 +131,7 @@ class CursorServer:
             
         return ips
 
-    async def handle_client(self, websocket, path):
+    async def handle_client(self, websocket):
         """Handle WebSocket client connection"""
         client_addr = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         logger.info(f'Client connected: {client_addr}')
@@ -208,6 +208,7 @@ class CursorServer:
         logger.info('Env tuning: GAIN, MAX_STEP, FRICTION')
         
         # Start the server
+        # websockets v15+ passes only the connection object to the handler
         self.server = await websockets.serve(
             self.handle_client,
             '0.0.0.0',
