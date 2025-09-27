@@ -8,6 +8,7 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict
+import math
 
 from pynput import mouse
 try:
@@ -31,6 +32,8 @@ class MotionEnvelope:
 
     dx: float
     dy: float
+    raw_east: float
+    raw_north: float
 
 
 class MotionWebSocketServer:
@@ -108,7 +111,13 @@ class MotionWebSocketServer:
                 accum_dx -= move_dx
                 accum_dy -= move_dy
 
-                LOGGER.debug("Moving cursor by (%s, %s)", move_dx, move_dy)
+                LOGGER.debug(
+                    "Moving cursor by (%s, %s) (raw meters east=%.3f north=%.3f)",
+                    move_dx,
+                    move_dy,
+                    payload.raw_east,
+                    payload.raw_north,
+                )
                 await asyncio.to_thread(self._mouse.move, move_dx, move_dy)
         except ConnectionClosed:
             LOGGER.info("Client disconnected: %s", peer)
@@ -137,19 +146,23 @@ class MotionWebSocketServer:
             return None
 
         try:
-            dx = float(data.get("dx", 0.0))
-            dy = float(data.get("dy", 0.0))
+            dx_raw = float(data.get("dx", 0.0))
+            dy_raw = float(data.get("dy", 0.0))
         except (TypeError, ValueError):
             LOGGER.debug("Payload dx/dy are not numeric: %s", data)
             return None
 
-        dx = self._normalise(dx)
-        dy = self._normalise(dy)
+        raw_meters = data.get("meters") or {}
+        raw_east = float(raw_meters.get("east", 0.0)) if isinstance(raw_meters, dict) else 0.0
+        raw_north = float(raw_meters.get("north", 0.0)) if isinstance(raw_meters, dict) else 0.0
+
+        dx = self._normalise(dx_raw)
+        dy = self._normalise(dy_raw)
 
         if dx == 0.0 and dy == 0.0:
             return None
 
-        return MotionEnvelope(dx=dx, dy=dy)
+        return MotionEnvelope(dx=dx, dy=dy, raw_east=raw_east, raw_north=raw_north)
 
     def _normalise(self, value: float) -> float:
         if math.isnan(value) or math.isinf(value):

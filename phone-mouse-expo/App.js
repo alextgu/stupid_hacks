@@ -2,6 +2,26 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, TextInput, Button, SafeAreaView, Platform, ScrollView, Switch } from 'react-native';
 import { Gyroscope, Accelerometer } from 'expo-sensors';
+import * as Location from 'expo-location';
+
+const EARTH_RADIUS_METERS = 6378137;
+
+function coordsToDisplacementMeters(prev, next) {
+  if (!prev || !next) {
+    return { east: 0, north: 0 };
+  }
+
+  const lat1 = prev.latitude * (Math.PI / 180);
+  const lat2 = next.latitude * (Math.PI / 180);
+  const dLat = lat2 - lat1;
+  const dLon = (next.longitude - prev.longitude) * (Math.PI / 180);
+  const avgLat = (lat1 + lat2) / 2;
+
+  const north = EARTH_RADIUS_METERS * dLat;
+  const east = EARTH_RADIUS_METERS * Math.cos(avgLat) * dLon;
+
+  return { east, north };
+}
 
 export default function App() {
   const [address, setAddress] = useState('');
@@ -9,6 +29,8 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const [gyro, setGyro] = useState({ x: 0, y: 0, z: 0 });
   const [accel, setAccel] = useState({ x: 0, y: 0, z: 0 });
+  const [location, setLocation] = useState(null);
+  const [lastLocation, setLastLocation] = useState(null);
   const [sensitivity, setSensitivity] = useState('1.0');
   const [lastDelta, setLastDelta] = useState({ dx: 0, dy: 0 });
   const [debug, setDebug] = useState(false);
@@ -23,15 +45,46 @@ export default function App() {
   // Sensor setup
   useEffect(() => {
     Gyroscope.setUpdateInterval(16); // ~60Hz
-    Accelerometer.setUpdateInterval(50); // ~20Hz, optional
+    Accelerometer.setUpdateInterval(50);
     const gsub = Gyroscope.addListener((g) => {
       gyroRef.current = g;
       setGyro(g);
     });
     const asub = Accelerometer.addListener((a) => setAccel(a));
+    let locationSub = null;
+
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.warn('Location permission denied');
+        return;
+      }
+
+      const initial = await Location.getCurrentPositionAsync({});
+      setLocation(initial.coords);
+      setLastLocation(initial.coords);
+
+      locationSub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 200,
+          distanceInterval: 0.2,
+        },
+        (update) => {
+          setLocation((current) => {
+            setLastLocation(current);
+            return update.coords;
+          });
+        },
+      );
+    })();
+
     return () => {
       gsub && gsub.remove();
       asub && asub.remove();
+      if (locationSub) {
+        locationSub.remove();
+      }
     };
   }, []);
 
@@ -78,47 +131,35 @@ export default function App() {
   }, []);
 
   // Motion → delta mapping
-  const computeDelta = useCallback((g) => {
-    // Use yaw rate (z) to steer horizontal, pitch rate (x) for vertical
-    // Normalize and clamp to reduce spikes
-    const gainX = 100; // px per rad/s at 60hz → per frame delta
-    const gainY = 110;
-    const clamp = 80;
-
-    let dx = g.z * gainX * (1 / 60);
-    let dy = -g.x * gainY * (1 / 60);
-
-    const dead = 0.01;
-    const deadify = (v) => (Math.abs(v) < dead ? 0 : v);
-    dx = deadify(dx);
-    dy = deadify(dy);
-
+  const computeDelta = useCallback(() => {
     const sens = Number(sensitivity || '1');
-    dx *= sens;
-    dy *= sens;
 
-    const mag = Math.hypot(dx, dy);
-    if (mag > clamp && mag > 0) {
-      const s = clamp / mag;
-      dx *= s;
-      dy *= s;
+    if (!location || !lastLocation) {
+      return { dx: 0, dy: 0, meters: { east: 0, north: 0 } };
     }
-    return { dx, dy };
-  }, [sensitivity]);
+
+    const { east, north } = coordsToDisplacementMeters(lastLocation, location);
+
+    const gain = 6; // pixels per meter; tune as needed
+    const dx = east * gain * sens;
+    const dy = -north * gain * sens; // Walking north → pointer up
+
+    return { dx, dy, meters: { east, north } };
+  }, [location, lastLocation, sensitivity]);
 
   // Send loop throttled to ~60Hz; we already have 60Hz gyro
   useEffect(() => {
     if (!streaming) return;
     const id = setInterval(() => {
-      const { dx, dy } = computeDelta(gyroRef.current);
+      const { dx, dy, meters } = computeDelta();
       setLastDelta({ dx, dy });
       try {
         if (debugRef.current) {
-          console.log('Delta', { dx, dy });
+          console.log('Delta', { dx, dy, meters });
         }
         const socket = wsRef.current;
         if (connected && socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ dx, dy, timestamp: Date.now() }));
+          socket.send(JSON.stringify({ dx, dy, meters, timestamp: Date.now() }));
         }
       } catch (err) {
         console.warn('Failed to handle delta', err);
