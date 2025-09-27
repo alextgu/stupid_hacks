@@ -22,6 +22,11 @@ import websockets
 from pynput.mouse import Button, Listener as MouseListener
 from pynput import mouse
 
+if sys.platform == 'darwin':
+    # Deferred import so we only require these modules on macOS
+    import ctypes
+    import ctypes.util
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +56,9 @@ class CursorServer:
         self.mouse_controller = mouse.Controller()
         self.last_pos = self.mouse_controller.position
         
+        # Proactively verify Accessibility permissions on macOS
+        self._check_accessibility_permissions()
+
         # WebSocket server
         self.server = None
         self.connected_clients = set()
@@ -107,6 +115,49 @@ class CursorServer:
         
         thread = threading.Thread(target=selftest, daemon=True)
         thread.start()
+
+    def _check_accessibility_permissions(self):
+        """On macOS, confirm we have Accessibility privileges for the Python binary."""
+        if sys.platform != 'darwin':
+            return
+
+        trusted = None
+        try:
+            app_services_path = ctypes.util.find_library('ApplicationServices')
+            if app_services_path:
+                app_services = ctypes.cdll.LoadLibrary(app_services_path)
+                app_services.AXIsProcessTrusted.restype = ctypes.c_bool
+                trusted = app_services.AXIsProcessTrusted()
+        except Exception as exc:
+            logger.debug(f'Unable to query Accessibility trust state: {exc}')
+
+        if trusted is False:
+            logger.warning(
+                'macOS reports this process is NOT trusted for Accessibility. '
+                'Add the Python interpreter to System Settings → Privacy & Security → Accessibility: %s',
+                sys.executable
+            )
+            return
+
+        # Even if macOS reports trusted, verify we can actually move the cursor.
+        try:
+            original_pos = self.mouse_controller.position
+            test_pos = (original_pos[0] + 2, original_pos[1] + 2)
+            self.mouse_controller.position = test_pos
+            time.sleep(0.05)
+            current_pos = self.mouse_controller.position
+            self.mouse_controller.position = original_pos
+
+            if (round(current_pos[0]), round(current_pos[1])) == (
+                round(original_pos[0]), round(original_pos[1])
+            ):
+                logger.warning(
+                    'Cursor move self-test indicates no movement. macOS likely blocked control. '
+                    'Add Accessibility permission for the interpreter binary: %s',
+                    sys.executable
+                )
+        except Exception as exc:
+            logger.error(f'Cursor move self-test failed: {exc}')
 
     def _get_local_ips(self) -> list:
         """Get local network interface IP addresses"""
