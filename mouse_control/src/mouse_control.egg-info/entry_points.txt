@@ -1,0 +1,3 @@
+[console_scripts]
+mouse-control = mouse_control.__main__:main
+mouse-control-server = mouse_control.server:main

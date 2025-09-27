@@ -1,5 +1,0 @@
-websockets==12.0
-pynput==1.7.7
-
-
-

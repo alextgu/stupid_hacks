@@ -1,0 +1,25 @@
+{
+  "name": "@mouse_control/server",
+  "version": "0.1.0",
+  "description": "Wrapper to launch the Python mouse control WebSocket server from Node",
+  "type": "module",
+  "main": "./server.js",
+  "exports": {
+    ".": "./server.js"
+  },
+  "files": [
+    "server.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mouse",
+    "cursor",
+    "websocket",
+    "python"
+  ],
+  "author": "Landbase User",
+  "license": "MIT"
+}
+

@@ -1,2 +1,0 @@
-websockets>=11.0
-pynput>=1.7.6

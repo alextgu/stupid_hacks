@@ -1,23 +1,33 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, TextInput, Button, SafeAreaView, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, Button, SafeAreaView, Platform, ScrollView, Switch } from 'react-native';
 import { Gyroscope, Accelerometer } from 'expo-sensors';
 
 export default function App() {
-  const [ip, setIp] = useState('');
-  const [port, setPort] = useState('8080');
+  const [address, setAddress] = useState('');
   const [connected, setConnected] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [gyro, setGyro] = useState({ x: 0, y: 0, z: 0 });
   const [accel, setAccel] = useState({ x: 0, y: 0, z: 0 });
   const [sensitivity, setSensitivity] = useState('1.0');
+  const [lastDelta, setLastDelta] = useState({ dx: 0, dy: 0 });
+  const [debug, setDebug] = useState(false);
   const wsRef = useRef(null);
+  const debugRef = useRef(false);
+  const gyroRef = useRef({ x: 0, y: 0, z: 0 });
+
+  useEffect(() => {
+    debugRef.current = debug;
+  }, [debug]);
 
   // Sensor setup
   useEffect(() => {
     Gyroscope.setUpdateInterval(16); // ~60Hz
     Accelerometer.setUpdateInterval(50); // ~20Hz, optional
-    const gsub = Gyroscope.addListener((g) => setGyro(g));
+    const gsub = Gyroscope.addListener((g) => {
+      gyroRef.current = g;
+      setGyro(g);
+    });
     const asub = Accelerometer.addListener((a) => setAccel(a));
     return () => {
       gsub && gsub.remove();
@@ -27,12 +37,15 @@ export default function App() {
 
   const connect = useCallback(() => {
     if (wsRef.current) {
-      try { wsRef.current.close(); } catch {}
+      try { wsRef.current.close(); } catch { /* noop */ }
       wsRef.current = null;
     }
-    if (!ip || !port) return;
-    const url = `ws://${ip}:${port}`;
+    if (!address) return;
+
+    const url = address.startsWith('ws://') || address.startsWith('wss://') ? address : `ws://${address}`;
     const ws = new WebSocket(url);
+    wsRef.current = ws;
+
     ws.onopen = () => {
       setConnected(true);
     };
@@ -44,8 +57,16 @@ export default function App() {
       setConnected(false);
       setStreaming(false);
     };
-    wsRef.current = ws;
-  }, [ip, port]);
+    ws.onmessage = (event) => {
+      if (!debugRef.current) return;
+      try {
+        const payload = JSON.parse(event.data);
+        console.log('Server message', payload);
+      } catch (err) {
+        console.log('Server message', event.data);
+      }
+    };
+  }, [address]);
 
   const disconnect = useCallback(() => {
     setStreaming(false);
@@ -87,15 +108,32 @@ export default function App() {
 
   // Send loop throttled to ~60Hz; we already have 60Hz gyro
   useEffect(() => {
-    if (!streaming || !connected || !wsRef.current) return;
+    if (!streaming) return;
     const id = setInterval(() => {
-      const { dx, dy } = computeDelta(gyro);
+      const { dx, dy } = computeDelta(gyroRef.current);
+      setLastDelta({ dx, dy });
       try {
-        wsRef.current?.send(JSON.stringify({ dx, dy }));
-      } catch {}
+        if (debugRef.current) {
+          console.log('Delta', { dx, dy });
+        }
+        const socket = wsRef.current;
+        if (connected && socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ dx, dy, timestamp: Date.now() }));
+        }
+      } catch (err) {
+        console.warn('Failed to handle delta', err);
+      }
     }, 16);
     return () => clearInterval(id);
-  }, [streaming, connected, gyro, computeDelta]);
+  }, [streaming, connected, computeDelta]);
+
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch { /* noop */ }
+      }
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -103,18 +141,11 @@ export default function App() {
       <View style={styles.row}>
         <TextInput
           style={styles.input}
-          placeholder="Mac IP (e.g. 192.168.1.10)"
-          value={ip}
-          onChangeText={setIp}
+          placeholder="Server address (ws://192.168.1.10:8080)"
+          value={address}
+          onChangeText={setAddress}
           autoCapitalize="none"
           keyboardType="numbers-and-punctuation"
-        />
-        <TextInput
-          style={[styles.input, { width: 90, marginLeft: 12 }]}
-          placeholder="Port"
-          value={port}
-          onChangeText={setPort}
-          keyboardType="number-pad"
         />
       </View>
 
@@ -144,11 +175,17 @@ export default function App() {
         />
       </View>
 
-      <View style={styles.readout}>
+      <View style={styles.row}>
+        <Text style={{ marginRight: 8 }}>Debug Log</Text>
+        <Switch value={debug} onValueChange={setDebug} />
+      </View>
+
+      <ScrollView style={styles.readout}>
         <Text style={[styles.mono, styles.readoutLine]}>Gyro: x={gyro.x.toFixed(3)} y={gyro.y.toFixed(3)} z={gyro.z.toFixed(3)}</Text>
         <Text style={[styles.mono, styles.readoutLine]}>Accel: x={accel.x.toFixed(3)} y={accel.y.toFixed(3)} z={accel.z.toFixed(3)}</Text>
+        <Text style={[styles.mono, styles.readoutLine]}>Delta: dx={lastDelta.dx.toFixed(3)} dy={lastDelta.dy.toFixed(3)}</Text>
         <Text style={[styles.mono, styles.readoutLine]}>Status: {connected ? 'Connected' : 'Disconnected'} | {streaming ? 'Streaming' : 'Idle'}</Text>
-      </View>
+      </ScrollView>
 
       <StatusBar style="auto" />
     </SafeAreaView>

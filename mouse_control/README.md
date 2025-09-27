@@ -1,0 +1,82 @@
+# Mouse Control Tools
+
+This project provides utilities to drive the macOS mouse either from the keyboard (WASD) or by streaming motion deltas over WebSocket to integrate with remote clients such as the Expo app.
+
+## Requirements
+
+- Python 3.9+
+- macOS needs the terminal (or app bundle) running this script to have *Accessibility* permissions so it can control the mouse.
+
+## Quick start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ./mouse_control
+
+# Keyboard controller (WASD input)
+mouse-control
+
+# WebSocket server for remote deltas
+mouse-control-server --port 8080
+```
+
+While the program is running:
+
+- `W` moves the pointer up
+- `A` moves left
+- `S` moves down
+- `D` moves right
+- `Esc` cleanly stops the program (or press `Ctrl+C`)
+
+## Keyboard controller options
+
+```bash
+mouse-control --step 30 --interval 0.03
+```
+
+- `--step` controls how many pixels the cursor moves per update (default: 20)
+- `--interval` controls how often movement happens while a key is held, in seconds (default: 0.04s)
+
+## WebSocket server
+
+Run `mouse-control-server` to expose a WebSocket endpoint that accepts JSON payloads like `{ "dx": 5.2, "dy": -3.1 }`. Typical usage with the Expo client is to point the phone at `ws://<mac-ip>:8080`.
+
+```bash
+mouse-control-server --host 0.0.0.0 --port 8080 --gain 1.2 --max-step 80 --deadzone 0.01
+```
+
+- `--gain`: multiplier applied to incoming deltas (default: 1.0)
+- `--max-step`: clamp per-message cursor movement in pixels (default: 120)
+- `--deadzone`: ignore delta magnitude below threshold (default: 0.004)
+
+## Accessibility permissions on macOS
+
+1. Open **System Settings → Privacy & Security → Accessibility**.
+2. Click the `+` button and add your terminal application (e.g. Terminal, iTerm, Cursor).
+3. Restart the script after granting permission.
+
+Without these permissions the mouse will not move, and the program will log a warning.
+
+## Project structure
+
+```
+mouse_control/
+├── pyproject.toml
+├── README.md
+└── src/
+    └── mouse_control/
+        ├── __init__.py
+        ├── __main__.py
+        ├── controller.py
+        └── server.py
+```
+
+## Development
+
+- Run `ruff` or `flake8` if you want linting.
+- Use `python -m mouse_control` while developing editable installs.
+
+## License
+
+MIT

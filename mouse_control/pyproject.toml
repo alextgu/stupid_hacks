@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mouse-control"
+version = "0.1.0"
+description = "Control the mouse pointer with WASD keys."
+authors = [
+  { name = "Landbase User" }
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "pynput>=1.7",
+  "websockets>=12.0"
+]
+
+[project.scripts]
+mouse-control = "mouse_control.__main__:main"
+mouse-control-server = "mouse_control.server:main"

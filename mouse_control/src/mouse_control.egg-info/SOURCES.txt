@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/mouse_control/__init__.py
+src/mouse_control/__main__.py
+src/mouse_control/controller.py
+src/mouse_control/server.py
+src/mouse_control.egg-info/PKG-INFO
+src/mouse_control.egg-info/SOURCES.txt
+src/mouse_control.egg-info/dependency_links.txt
+src/mouse_control.egg-info/entry_points.txt
+src/mouse_control.egg-info/requires.txt
+src/mouse_control.egg-info/top_level.txt
